@@ -292,6 +292,14 @@
         margin: 20px 0;
         border-left: 4px solid #dc3545;
       }
+
+      .instructions {
+        background: #e3f2fd;
+        padding: 20px;
+        border-radius: 10px;
+        margin-bottom: 20px;
+        border-left: 4px solid #2196f3;
+      }
     </style>
   </head>
   <body>
@@ -333,6 +341,16 @@
           <span id="statusText">Checking server status...</span>
         </div>
 
+        <!-- Instructions Section -->
+        <div class="instructions" id="instructionsSection">
+          <h3 style="margin-bottom: 10px; color: #1976d2">📋 How to Use</h3>
+          <p style="margin: 0; color: #666">
+            Enter a website URL below to get a comprehensive PageSpeed analysis
+            using Google's official API. This will analyze mobile performance,
+            desktop performance, SEO, and provide actionable recommendations.
+          </p>
+        </div>
+
         <!-- Audit Form -->
         <div class="audit-form">
           <h2 style="margin-bottom: 10px; color: #333">
@@ -366,11 +384,25 @@
         <!-- Loading State -->
         <div class="loading" id="loadingState">
           <div class="spinner"></div>
-          <p>Running Google PageSpeed Insights analysis...</p>
+          <p>🔍 Running Google PageSpeed Insights analysis...</p>
           <p style="font-size: 0.8rem; color: #888">
-            This may take 30-60 seconds as we analyze both mobile and desktop
-            performance
+            This typically takes 15-45 seconds as we analyze both mobile and
+            desktop performance
           </p>
+          <div
+            style="
+              background: #fef3c7;
+              border: 1px solid #f59e0b;
+              border-radius: 8px;
+              padding: 12px;
+              margin-top: 15px;
+              font-size: 0.9rem;
+            "
+          >
+            <strong>⏱️ Taking longer than usual?</strong><br />
+            Google's servers may be experiencing high load. The analysis will
+            timeout if needed.
+          </div>
         </div>
 
         <!-- Error Display -->
@@ -475,59 +507,107 @@
         }
       }
 
-      // Start website audit
+      // Start website audit with better error handling
       async function startAudit() {
-        const url = document.getElementById("url").value;
-        const email = document.getElementById("email").value;
+        const url = document.getElementById("url").value.trim();
+        const email = document.getElementById("email").value.trim();
 
         if (!url) {
           showError("Please enter a website URL");
           return;
         }
 
-        // Show loading state
-        document.getElementById("auditBtn").disabled = true;
-        document.getElementById("loadingState").style.display = "block";
-        document.getElementById("results").style.display = "none";
-        document.getElementById("instructionsSection").style.display = "none";
-        document.getElementById("errorDisplay").innerHTML = "";
+        console.log("🚀 Starting audit for:", url);
 
         try {
+          // Show loading state
+          const auditBtn = document.getElementById("auditBtn");
+          const loadingState = document.getElementById("loadingState");
+          const results = document.getElementById("results");
+          const instructionsSection = document.getElementById(
+            "instructionsSection"
+          );
+          const errorDisplay = document.getElementById("errorDisplay");
+
+          if (auditBtn) auditBtn.disabled = true;
+          if (loadingState) loadingState.style.display = "block";
+          if (results) results.style.display = "none";
+          if (instructionsSection) instructionsSection.style.display = "none";
+          if (errorDisplay) errorDisplay.innerHTML = "";
+
+          console.log("🔄 Sending request to server...");
+
+          // Set a client-side timeout
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 120000); // 2 minutes
+
           const response = await fetch(`${API_BASE}/audit/start`, {
             method: "POST",
             headers: {
               "Content-Type": "application/json",
             },
             body: JSON.stringify({ url, email }),
+            signal: controller.signal,
           });
+
+          clearTimeout(timeoutId);
+
+          console.log("📡 Response received:", response.status);
 
           const result = await response.json();
 
           if (response.ok) {
+            console.log("✅ Audit successful");
             displayResults(result.data);
           } else {
-            throw new Error(result.message || "Audit failed");
+            console.error("❌ Audit failed:", result);
+            throw new Error(result.error || result.message || "Audit failed");
           }
         } catch (error) {
-          showError(`Audit failed: ${error.message}`);
+          console.error("❌ Audit error:", error);
+
+          if (error.name === "AbortError") {
+            showError(
+              "Analysis timed out after 2 minutes. This can happen with very slow websites. Please try a different URL or try again later."
+            );
+          } else {
+            showError(`Audit failed: ${error.message}`);
+          }
         } finally {
-          // Hide loading state
-          document.getElementById("auditBtn").disabled = false;
-          document.getElementById("loadingState").style.display = "none";
+          // Reset UI state
+          const auditBtn = document.getElementById("auditBtn");
+          const loadingState = document.getElementById("loadingState");
+          const instructionsSection = document.getElementById(
+            "instructionsSection"
+          );
+
+          if (auditBtn) auditBtn.disabled = false;
+          if (loadingState) loadingState.style.display = "none";
 
           // Show instructions if no results are displayed
-          if (document.getElementById("results").style.display === "none") {
-            document.getElementById("instructionsSection").style.display =
-              "block";
+          const results = document.getElementById("results");
+          if (
+            results &&
+            results.style.display === "none" &&
+            instructionsSection
+          ) {
+            instructionsSection.style.display = "block";
           }
         }
       }
 
       // Display audit results
       function displayResults(data) {
+        console.log("📊 Displaying results:", data);
+
         // Show results section, hide instructions
-        document.getElementById("results").style.display = "block";
-        document.getElementById("instructionsSection").style.display = "none";
+        const results = document.getElementById("results");
+        const instructionsSection = document.getElementById(
+          "instructionsSection"
+        );
+
+        if (results) results.style.display = "block";
+        if (instructionsSection) instructionsSection.style.display = "none";
 
         // Safely access nested properties
         const summary = data.summary || {};
@@ -542,88 +622,99 @@
         const score = summary.overallScore || 0;
         const grade = summary.grade || "F";
 
-        document.getElementById("scoreNumber").textContent = score;
-        document.getElementById(
-          "scoreNumber"
-        ).className = `score-number score-${grade.toLowerCase()}`;
-        document.getElementById("gradeDisplay").textContent = `Grade ${grade}`;
-        document.getElementById(
-          "gradeDisplay"
-        ).className = `grade grade-${grade.toLowerCase()}`;
-        document.getElementById("urlDisplay").textContent =
-          summary.url || "Unknown URL";
+        const scoreNumber = document.getElementById("scoreNumber");
+        const gradeDisplay = document.getElementById("gradeDisplay");
+        const urlDisplay = document.getElementById("urlDisplay");
+
+        if (scoreNumber) {
+          scoreNumber.textContent = score;
+          scoreNumber.className = `score-number score-${grade.toLowerCase()}`;
+        }
+
+        if (gradeDisplay) {
+          gradeDisplay.textContent = `Grade ${grade}`;
+          gradeDisplay.className = `grade grade-${grade.toLowerCase()}`;
+        }
+
+        if (urlDisplay) {
+          urlDisplay.textContent = summary.url || "Unknown URL";
+        }
 
         // Update metrics with safe access
         const metricsGrid = document.getElementById("metricsGrid");
-        metricsGrid.innerHTML = `
-                <div class="metric">
-                    <div class="metric-value">${
-                      mobile.performanceScore || "N/A"
-                    }</div>
-                    <div class="metric-label">📱 Mobile Performance<br><small>Google PageSpeed</small></div>
-                </div>
-                <div class="metric">
-                    <div class="metric-value">${
-                      desktop.performanceScore || "N/A"
-                    }</div>
-                    <div class="metric-label">💻 Desktop Performance<br><small>Google PageSpeed</small></div>
-                </div>
-                <div class="metric">
-                    <div class="metric-value">${formatTime(
-                      mobile.largestContentfulPaint
-                    )}</div>
-                    <div class="metric-label">⚡ Largest Contentful Paint<br><small>Core Web Vital</small></div>
-                </div>
-                <div class="metric">
-                    <div class="metric-value">${
-                      mobile.cumulativeLayoutShift
-                        ? mobile.cumulativeLayoutShift.toFixed(3)
-                        : "N/A"
-                    }</div>
-                    <div class="metric-label">📐 Cumulative Layout Shift<br><small>Core Web Vital</small></div>
-                </div>
-                <div class="metric">
-                    <div class="metric-value">${seo.seoScore || "N/A"}</div>
-                    <div class="metric-label">🔍 SEO Score<br><small>Google Analysis</small></div>
-                </div>
-                <div class="metric">
-                    <div class="metric-value">${
-                      mobile.accessibilityScore || "N/A"
-                    }</div>
-                    <div class="metric-label">♿ Accessibility<br><small>Google Lighthouse</small></div>
-                </div>
-            `;
+        if (metricsGrid) {
+          metricsGrid.innerHTML = `
+                  <div class="metric">
+                      <div class="metric-value">${
+                        mobile.performanceScore || "N/A"
+                      }</div>
+                      <div class="metric-label">📱 Mobile Performance<br><small>Google PageSpeed</small></div>
+                  </div>
+                  <div class="metric">
+                      <div class="metric-value">${
+                        desktop.performanceScore || "N/A"
+                      }</div>
+                      <div class="metric-label">💻 Desktop Performance<br><small>Google PageSpeed</small></div>
+                  </div>
+                  <div class="metric">
+                      <div class="metric-value">${formatTime(
+                        mobile.largestContentfulPaint
+                      )}</div>
+                      <div class="metric-label">⚡ Largest Contentful Paint<br><small>Core Web Vital</small></div>
+                  </div>
+                  <div class="metric">
+                      <div class="metric-value">${
+                        mobile.cumulativeLayoutShift
+                          ? mobile.cumulativeLayoutShift.toFixed(3)
+                          : "N/A"
+                      }</div>
+                      <div class="metric-label">📐 Cumulative Layout Shift<br><small>Core Web Vital</small></div>
+                  </div>
+                  <div class="metric">
+                      <div class="metric-value">${seo.seoScore || "N/A"}</div>
+                      <div class="metric-label">🔍 SEO Score<br><small>Google Analysis</small></div>
+                  </div>
+                  <div class="metric">
+                      <div class="metric-value">${
+                        mobile.accessibilityScore || "N/A"
+                      }</div>
+                      <div class="metric-label">♿ Accessibility<br><small>Google Lighthouse</small></div>
+                  </div>
+              `;
+        }
 
         // Update issues with safe access
         const issuesList = document.getElementById("issuesList");
         const criticalIssues = data.criticalIssues || [];
 
-        if (criticalIssues.length > 0) {
-          issuesList.innerHTML = criticalIssues
-            .map(
-              (issue) => `
-                    <div class="issue">
-                        <div class="issue-title">
-                            ${issue.type || "Unknown Issue"} - ${
-                issue.severity || "Unknown"
-              } Priority
-                            ${
-                              issue.googleMetric
-                                ? '<span style="background: #4285f4; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; margin-left: 10px;">GOOGLE METRIC</span>'
-                                : ""
-                            }
-                        </div>
-                        <div>${issue.issue || "No details available"}</div>
-                        <div style="margin-top: 5px; font-style: italic;">Impact: ${
-                          issue.impact || "Unknown impact"
-                        }</div>
-                    </div>
-                `
-            )
-            .join("");
-        } else {
-          issuesList.innerHTML =
-            '<p style="color: #28a745;">✅ No critical issues found by Google PageSpeed Insights!</p>';
+        if (issuesList) {
+          if (criticalIssues.length > 0) {
+            issuesList.innerHTML = criticalIssues
+              .map(
+                (issue) => `
+                      <div class="issue">
+                          <div class="issue-title">
+                              ${issue.type || "Unknown Issue"} - ${
+                  issue.severity || "Unknown"
+                } Priority
+                              ${
+                                issue.googleMetric
+                                  ? '<span style="background: #4285f4; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; margin-left: 10px;">GOOGLE METRIC</span>'
+                                  : ""
+                              }
+                          </div>
+                          <div>${issue.issue || "No details available"}</div>
+                          <div style="margin-top: 5px; font-style: italic;">Impact: ${
+                            issue.impact || "Unknown impact"
+                          }</div>
+                      </div>
+                  `
+              )
+              .join("");
+          } else {
+            issuesList.innerHTML =
+              '<p style="color: #28a745;">✅ No critical issues found by Google PageSpeed Insights!</p>';
+          }
         }
 
         // Update recommendations with safe access
@@ -632,49 +723,60 @@
         );
         const recommendations = data.recommendations || [];
 
-        if (recommendations.length > 0) {
-          recommendationsList.innerHTML = recommendations
-            .map(
-              (rec) => `
-                    <div class="recommendation">
-                        <div class="recommendation-title">
-                            ${rec.action || "Improvement needed"} - ${
-                rec.priority || "Unknown"
-              } Priority
-                            <span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; margin-left: 10px;">${
-                              rec.source || "GOOGLE INSIGHTS"
-                            }</span>
-                        </div>
-                        <div>Expected Impact: ${
-                          rec.expectedImpact || "Improved performance"
-                        }</div>
-                        <div style="margin-top: 5px; font-weight: bold;">Timeline: ${
-                          rec.timeline || "TBD"
-                        }</div>
-                    </div>
-                `
-            )
-            .join("");
-        } else {
-          recommendationsList.innerHTML =
-            '<p style="color: #28a745;">✅ No immediate recommendations needed - Google rates this site well!</p>';
+        if (recommendationsList) {
+          if (recommendations.length > 0) {
+            recommendationsList.innerHTML = recommendations
+              .map(
+                (rec) => `
+                      <div class="recommendation">
+                          <div class="recommendation-title">
+                              ${rec.action || "Improvement needed"} - ${
+                  rec.priority || "Unknown"
+                } Priority
+                              <span style="background: #28a745; color: white; padding: 2px 6px; border-radius: 3px; font-size: 0.7rem; margin-left: 10px;">${
+                                rec.source || "GOOGLE INSIGHTS"
+                              }</span>
+                          </div>
+                          <div>Expected Impact: ${
+                            rec.expectedImpact || "Improved performance"
+                          }</div>
+                          <div style="margin-top: 5px; font-weight: bold;">Timeline: ${
+                            rec.timeline || "TBD"
+                          }</div>
+                      </div>
+                  `
+              )
+              .join("");
+          } else {
+            recommendationsList.innerHTML =
+              '<p style="color: #28a745;">✅ No immediate recommendations needed - Google rates this site well!</p>';
+          }
         }
       }
 
       // Show error message
       function showError(message) {
-        document.getElementById("errorDisplay").innerHTML = `
-                <div class="error">
-                    <strong>Error:</strong> ${message}
-                    <div style="margin-top: 15px;">
-                        <button onclick="startAudit()" style="background: #6366f1; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9rem;">
-                            🔄 Try Again
-                        </button>
-                    </div>
-                </div>
-            `;
+        const errorDisplay = document.getElementById("errorDisplay");
+        if (errorDisplay) {
+          errorDisplay.innerHTML = `
+                  <div class="error">
+                      <strong>Error:</strong> ${message}
+                      <div style="margin-top: 15px;">
+                          <button onclick="startAudit()" style="background: #6366f1; color: white; border: none; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 0.9rem;">
+                              🔄 Try Again
+                          </button>
+                      </div>
+                  </div>
+              `;
+        }
+
         // Show instructions again on error
-        document.getElementById("instructionsSection").style.display = "block";
+        const instructionsSection = document.getElementById(
+          "instructionsSection"
+        );
+        if (instructionsSection) {
+          instructionsSection.style.display = "block";
+        }
       }
 
       // Format time in milliseconds to seconds
@@ -686,19 +788,24 @@
       checkServerStatus();
 
       // Allow Enter key to submit
-      document.getElementById("url").addEventListener("keypress", function (e) {
-        if (e.key === "Enter") {
-          startAudit();
-        }
-      });
+      const urlInput = document.getElementById("url");
+      const emailInput = document.getElementById("email");
 
-      document
-        .getElementById("email")
-        .addEventListener("keypress", function (e) {
+      if (urlInput) {
+        urlInput.addEventListener("keypress", function (e) {
           if (e.key === "Enter") {
             startAudit();
           }
         });
+      }
+
+      if (emailInput) {
+        emailInput.addEventListener("keypress", function (e) {
+          if (e.key === "Enter") {
+            startAudit();
+          }
+        });
+      }
     </script>
   </body>
 </html>
