@@ -1,4 +1,4 @@
-// website-analysis-agent.js - Fixed PageSpeed Insights Integration
+// website-analysis-agent.js - Fixed PageSpeed Insights Integration with Debug Logging
 // SiteLaunch Studios AI Agent using Google's PageSpeed Insights API
 
 const https = require("https");
@@ -62,6 +62,10 @@ class PageSpeedAnalysisAgent {
         analysisPromises
       );
 
+      // Debug logging to see what we got back
+      console.log("🔍 Mobile results received:", !!mobileResults);
+      console.log("🔍 Desktop results received:", !!desktopResults);
+
       // Check if we got any results
       if (!mobileResults && !desktopResults) {
         throw new Error(
@@ -75,15 +79,29 @@ class PageSpeedAnalysisAgent {
       analysis.mobile = mobileResults
         ? this.parseMobileResults(mobileResults)
         : this.getEmptyMobileResults();
+
       analysis.desktop = desktopResults
         ? this.parseDesktopResults(desktopResults)
         : this.getEmptyDesktopResults();
+
       analysis.technical = mobileResults
         ? this.parseTechnicalResults(mobileResults)
         : this.getEmptyTechnicalResults();
+
       analysis.seo = mobileResults
         ? this.parseSEOResults(mobileResults)
         : this.getEmptySEOResults();
+
+      // Debug the parsed scores
+      console.log(
+        "🔍 Parsed mobile performance:",
+        analysis.mobile.performanceScore
+      );
+      console.log(
+        "🔍 Parsed desktop performance:",
+        analysis.desktop.performanceScore
+      );
+      console.log("🔍 Parsed SEO score:", analysis.seo.seoScore);
 
       analysis.score = this.calculateOverallScore(analysis);
 
@@ -120,14 +138,22 @@ class PageSpeedAnalysisAgent {
   async runPageSpeedAnalysis(url, strategy = "mobile") {
     console.log(`📊 Running ${strategy} PageSpeed analysis...`);
 
-    // Build API URL
+    // Build API URL - Add all categories back now that it's working
     const params = new URLSearchParams({
       url: url,
       strategy: strategy,
-      category: ["performance", "accessibility", "best-practices", "seo"].join(
-        ","
-      ),
       locale: "en",
+    });
+
+    // Add all categories for complete analysis
+    const categories = [
+      "performance",
+      "accessibility",
+      "best-practices",
+      "seo",
+    ];
+    categories.forEach((category) => {
+      params.append("category", category);
     });
 
     if (this.apiKey) {
@@ -135,19 +161,28 @@ class PageSpeedAnalysisAgent {
     }
 
     const apiUrl = `${this.apiBase}?${params.toString()}`;
+    console.log(
+      `🔗 ${strategy} API URL (first 200 chars): ${apiUrl.substring(0, 200)}...`
+    );
 
     return new Promise((resolve, reject) => {
-      // Set shorter timeout - 45 seconds max
+      console.log(`🔗 Making API request to: ${apiUrl.substring(0, 100)}...`);
+
+      // Set longer timeout - 60 seconds max for Google's slow API
       const timeout = setTimeout(() => {
+        console.log(`⏰ ${strategy} API call timed out after 60 seconds`);
         request.destroy();
         reject(
           new Error(
-            `PageSpeed API timeout after 45 seconds for ${strategy} analysis. Google's servers may be overloaded.`
+            `PageSpeed API timeout after 60 seconds for ${strategy} analysis. This may indicate the website is very slow or Google's servers are overloaded.`
           )
         );
-      }, 45000);
+      }, 60000);
 
       const request = https.get(apiUrl, (response) => {
+        console.log(
+          `📡 ${strategy} API responded with status: ${response.statusCode}`
+        );
         let data = "";
 
         response.on("data", (chunk) => {
@@ -155,11 +190,32 @@ class PageSpeedAnalysisAgent {
         });
 
         response.on("end", () => {
+          console.log(
+            `🏁 ${strategy} response complete. Total data: ${data.length} bytes`
+          );
           clearTimeout(timeout);
           try {
             if (response.statusCode === 200) {
               const result = JSON.parse(data);
               console.log(`✅ ${strategy} analysis completed successfully`);
+
+              // Debug: Log the structure of what we received
+              if (
+                result.lighthouseResult &&
+                result.lighthouseResult.categories
+              ) {
+                console.log(
+                  `🔍 ${strategy} categories received:`,
+                  Object.keys(result.lighthouseResult.categories)
+                );
+                console.log(
+                  `🔍 ${strategy} performance score:`,
+                  result.lighthouseResult.categories.performance?.score
+                );
+              } else {
+                console.log(`⚠️ ${strategy} missing expected structure`);
+              }
+
               resolve(result);
             } else if (response.statusCode === 429) {
               // Rate limited
@@ -196,6 +252,7 @@ class PageSpeedAnalysisAgent {
       });
 
       request.on("error", (error) => {
+        console.log(`❌ ${strategy} request error:`, error.code, error.message);
         clearTimeout(timeout);
         if (error.code === "ENOTFOUND") {
           reject(
@@ -215,9 +272,23 @@ class PageSpeedAnalysisAgent {
       });
 
       request.on("timeout", () => {
+        console.log(`⏰ ${strategy} request socket timeout`);
         clearTimeout(timeout);
         request.destroy();
         reject(new Error("PageSpeed API request timed out"));
+      });
+
+      // Add connection debugging
+      request.on("socket", (socket) => {
+        console.log(`🔌 ${strategy} request using socket`);
+
+        // Set socket timeout to 60 seconds to match our overall timeout
+        socket.setTimeout(60000);
+
+        socket.on("connect", () => {
+          console.log(`✅ ${strategy} socket connected to Google`);
+        });
+        // Remove timeout logging since it happens after successful completion
       });
     });
   }
@@ -227,6 +298,11 @@ class PageSpeedAnalysisAgent {
       const lighthouse = data.lighthouseResult || {};
       const audits = lighthouse.audits || {};
       const categories = lighthouse.categories || {};
+
+      console.log(
+        "🔍 Parsing mobile results - categories available:",
+        Object.keys(categories)
+      );
 
       // Safely extract metrics
       const mobile = {
@@ -251,6 +327,10 @@ class PageSpeedAnalysisAgent {
         mobileUsability: this.analyzeMobileUsability(audits),
       };
 
+      console.log(
+        "🔍 Mobile performance score extracted:",
+        mobile.performanceScore
+      );
       return mobile;
     } catch (error) {
       console.error("Error parsing mobile results:", error);
@@ -267,6 +347,11 @@ class PageSpeedAnalysisAgent {
       const lighthouse = data.lighthouseResult || {};
       const audits = lighthouse.audits || {};
       const categories = lighthouse.categories || {};
+
+      console.log(
+        "🔍 Parsing desktop results - categories available:",
+        Object.keys(categories)
+      );
 
       const desktop = {
         performanceScore: this.safeScore(categories.performance),
@@ -286,6 +371,10 @@ class PageSpeedAnalysisAgent {
         totalBlockingTime: this.safeNumericValue(audits["total-blocking-time"]),
       };
 
+      console.log(
+        "🔍 Desktop performance score extracted:",
+        desktop.performanceScore
+      );
       return desktop;
     } catch (error) {
       console.error("Error parsing desktop results:", error);
@@ -328,11 +417,14 @@ class PageSpeedAnalysisAgent {
         issues.push("Missing or poor page title");
       }
 
+      const bestPracticesScore = this.safeScore(categories["best-practices"]);
+      console.log("🔍 Best practices score extracted:", bestPracticesScore);
+
       return {
         issues: issues,
         hasSSL: this.auditPassed(audits["is-on-https"]),
         hasViewport: this.auditPassed(audits["viewport"]),
-        bestPracticesScore: this.safeScore(categories["best-practices"]),
+        bestPracticesScore: bestPracticesScore,
       };
     } catch (error) {
       console.error("Error parsing technical results:", error);
@@ -374,9 +466,12 @@ class PageSpeedAnalysisAgent {
         lighthouse.finalUrl || ""
       );
 
+      const seoScore = this.safeScore(categories.seo);
+      console.log("🔍 SEO score extracted:", seoScore);
+
       return {
         issues: issues,
-        seoScore: this.safeScore(categories.seo),
+        seoScore: seoScore,
         hasLocalKeywords: hasLocalKeywords,
         recommendations: hasLocalKeywords
           ? []
@@ -422,8 +517,11 @@ class PageSpeedAnalysisAgent {
         score -= 15;
       }
 
+      const finalScore = Math.max(0, score);
+      console.log("🔍 Mobile usability score calculated:", finalScore);
+
       return {
-        score: Math.max(0, score),
+        score: finalScore,
         issues: issues,
       };
     } catch (error) {
@@ -442,52 +540,114 @@ class PageSpeedAnalysisAgent {
   }
 
   calculateOverallScore(analysis) {
+    console.log("🔍 Calculating overall score...");
+    console.log("🔍 Analysis data:", {
+      mobilePerf: analysis.mobile.performanceScore,
+      desktopPerf: analysis.desktop.performanceScore,
+      mobileUsability: analysis.mobile.mobileUsability?.score,
+      seo: analysis.seo.seoScore,
+      technical: analysis.technical.bestPracticesScore,
+    });
+
+    // Default to Google's approach: Mobile Performance as primary score
+    const primaryScore = analysis.mobile.performanceScore || 0;
+
+    // Alternative calculation methods
+    const calculations = {
+      // Method 1: Mobile Performance Only (matches Google's main score)
+      mobileOnly: primaryScore,
+
+      // Method 2: Weighted average (current method)
+      weighted: this.calculateWeightedScore(analysis),
+
+      // Method 3: Average of all available scores
+      average: this.calculateAverageScore(analysis),
+    };
+
+    console.log(`🔍 Score calculation methods:`, calculations);
+
+    // Use mobile-only by default to match Google's official tool
+    const finalScore = Math.round(calculations.mobileOnly);
+    console.log(`🔍 Using mobile performance as primary score: ${finalScore}`);
+
+    return finalScore;
+  }
+
+  calculateWeightedScore(analysis) {
     let score = 0;
-    let maxScore = 0;
+    let weightUsed = 0;
 
     // Mobile Performance (40% weight)
     if (
-      analysis.mobile.performanceScore !== undefined &&
-      analysis.mobile.performanceScore !== null
+      analysis.mobile.performanceScore &&
+      analysis.mobile.performanceScore > 0
     ) {
-      score += analysis.mobile.performanceScore * 0.4;
-      maxScore += 40;
+      const contribution = analysis.mobile.performanceScore * 0.4;
+      score += contribution;
+      weightUsed += 0.4;
     }
 
     // Desktop Performance (20% weight)
     if (
-      analysis.desktop.performanceScore !== undefined &&
-      analysis.desktop.performanceScore !== null
+      analysis.desktop.performanceScore &&
+      analysis.desktop.performanceScore > 0
     ) {
-      score += analysis.desktop.performanceScore * 0.2;
-      maxScore += 20;
+      const contribution = analysis.desktop.performanceScore * 0.2;
+      score += contribution;
+      weightUsed += 0.2;
     }
 
     // Mobile Usability (20% weight)
     if (
       analysis.mobile.mobileUsability &&
-      analysis.mobile.mobileUsability.score !== undefined
+      analysis.mobile.mobileUsability.score > 0
     ) {
-      score += analysis.mobile.mobileUsability.score * 0.2;
-      maxScore += 20;
+      const contribution = analysis.mobile.mobileUsability.score * 0.2;
+      score += contribution;
+      weightUsed += 0.2;
     }
 
     // SEO Score (10% weight)
-    if (analysis.seo.seoScore !== undefined && analysis.seo.seoScore !== null) {
-      score += analysis.seo.seoScore * 0.1;
-      maxScore += 10;
+    if (analysis.seo.seoScore && analysis.seo.seoScore > 0) {
+      const contribution = analysis.seo.seoScore * 0.1;
+      score += contribution;
+      weightUsed += 0.1;
     }
 
     // Technical/Best Practices (10% weight)
     if (
-      analysis.technical.bestPracticesScore !== undefined &&
-      analysis.technical.bestPracticesScore !== null
+      analysis.technical.bestPracticesScore &&
+      analysis.technical.bestPracticesScore > 0
     ) {
-      score += analysis.technical.bestPracticesScore * 0.1;
-      maxScore += 10;
+      const contribution = analysis.technical.bestPracticesScore * 0.1;
+      score += contribution;
+      weightUsed += 0.1;
     }
 
-    return Math.round(score);
+    // Normalize if partial data
+    if (weightUsed > 0 && weightUsed < 1) {
+      score = score / weightUsed;
+    }
+
+    return score;
+  }
+
+  calculateAverageScore(analysis) {
+    const scores = [];
+
+    if (analysis.mobile.performanceScore > 0)
+      scores.push(analysis.mobile.performanceScore);
+    if (analysis.desktop.performanceScore > 0)
+      scores.push(analysis.desktop.performanceScore);
+    if (analysis.mobile.mobileUsability?.score > 0)
+      scores.push(analysis.mobile.mobileUsability.score);
+    if (analysis.seo.seoScore > 0) scores.push(analysis.seo.seoScore);
+    if (analysis.technical.bestPracticesScore > 0)
+      scores.push(analysis.technical.bestPracticesScore);
+
+    return scores.length > 0
+      ? scores.reduce((a, b) => a + b) / scores.length
+      : 0;
   }
 
   generateAuditReport(analysis) {
@@ -509,6 +669,10 @@ class PageSpeedAnalysisAgent {
       },
     };
 
+    console.log(
+      "📊 Generated audit report with overall score:",
+      report.summary.overallScore
+    );
     return report;
   }
 
@@ -517,6 +681,7 @@ class PageSpeedAnalysisAgent {
     if (score >= 80) return "B";
     if (score >= 70) return "C";
     if (score >= 60) return "D";
+    if (score >= 50) return "E";
     return "F";
   }
 
@@ -660,9 +825,13 @@ class PageSpeedAnalysisAgent {
 
   // Helper methods for safe data extraction
   safeScore(category) {
-    return category && category.score !== null && category.score !== undefined
-      ? Math.round(category.score * 100)
-      : 0;
+    if (!category || category.score === null || category.score === undefined) {
+      console.log("🔍 SafeScore: No valid category or score found");
+      return 0;
+    }
+    const score = Math.round(category.score * 100);
+    console.log("🔍 SafeScore: Converted", category.score, "to", score);
+    return score;
   }
 
   safeNumericValue(audit) {
@@ -689,8 +858,8 @@ class PageSpeedAnalysisAgent {
   // Fallback methods for when PageSpeed API fails
   getEmptyMobileResults() {
     return {
-      performanceScore: null,
-      accessibilityScore: null,
+      performanceScore: 0,
+      accessibilityScore: 0,
       firstContentfulPaint: null,
       largestContentfulPaint: null,
       firstInputDelay: null,
@@ -708,8 +877,8 @@ class PageSpeedAnalysisAgent {
 
   getEmptyDesktopResults() {
     return {
-      performanceScore: null,
-      accessibilityScore: null,
+      performanceScore: 0,
+      accessibilityScore: 0,
       firstContentfulPaint: null,
       largestContentfulPaint: null,
       cumulativeLayoutShift: null,
@@ -725,14 +894,14 @@ class PageSpeedAnalysisAgent {
       ],
       hasSSL: null,
       hasViewport: null,
-      bestPracticesScore: null,
+      bestPracticesScore: 0,
     };
   }
 
   getEmptySEOResults() {
     return {
       issues: ["Unable to analyze SEO aspects - PageSpeed API unavailable"],
-      seoScore: null,
+      seoScore: 0,
       hasLocalKeywords: false,
       recommendations: [
         "Unable to provide SEO recommendations - please try again later",

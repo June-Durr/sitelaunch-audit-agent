@@ -52,6 +52,187 @@ app.get("/api/health", (req, res) => {
   });
 });
 
+// DEBUG ENDPOINTS - ADD THESE HERE
+app.get("/api/debug-pagespeed/:url", async (req, res) => {
+  console.log("🧪 Debug PageSpeed API test...");
+
+  try {
+    if (!auditAPI) {
+      throw new Error("Audit system not initialized");
+    }
+
+    const testUrl = req.params.url
+      ? `https://${req.params.url}`
+      : "https://www.google.com";
+    console.log("🧪 Testing with:", testUrl);
+
+    // Call the raw PageSpeed API method directly
+    const rawMobileResult = await auditAPI.agent.runPageSpeedAnalysis(
+      testUrl,
+      "mobile"
+    );
+
+    console.log("🧪 Raw API Response Keys:", Object.keys(rawMobileResult));
+
+    if (rawMobileResult.lighthouseResult) {
+      console.log(
+        "🧪 Lighthouse Categories:",
+        Object.keys(rawMobileResult.lighthouseResult.categories || {})
+      );
+
+      // Check each category score
+      const categories = rawMobileResult.lighthouseResult.categories || {};
+      for (const [name, category] of Object.entries(categories)) {
+        console.log(
+          `🧪 ${name} score:`,
+          category.score,
+          "->",
+          Math.round(category.score * 100)
+        );
+      }
+    }
+
+    res.json({
+      status: "success",
+      testUrl: testUrl,
+      rawResponse: {
+        hasLighthouseResult: !!rawMobileResult.lighthouseResult,
+        categories: rawMobileResult.lighthouseResult?.categories
+          ? Object.keys(rawMobileResult.lighthouseResult.categories)
+          : [],
+        categoryScores: rawMobileResult.lighthouseResult?.categories
+          ? Object.fromEntries(
+              Object.entries(rawMobileResult.lighthouseResult.categories).map(
+                ([name, cat]) => [
+                  name,
+                  { score: cat.score, scoreX100: Math.round(cat.score * 100) },
+                ]
+              )
+            )
+          : {},
+        loadingExperience: rawMobileResult.loadingExperience
+          ? "present"
+          : "missing",
+        originLoadingExperience: rawMobileResult.originLoadingExperience
+          ? "present"
+          : "missing",
+      },
+    });
+  } catch (error) {
+    console.error("❌ Debug test failed:");
+    console.error("Error name:", error.name);
+    console.error("Error message:", error.message);
+
+    res.status(500).json({
+      status: "error",
+      message: "Debug test failed",
+      error: error.message,
+      errorName: error.name,
+    });
+  }
+});
+
+// Test API key validity
+app.get("/api/test-api-key", async (req, res) => {
+  console.log("🔑 Testing API key validity...");
+
+  try {
+    if (!auditAPI) {
+      throw new Error("Audit system not initialized");
+    }
+
+    const apiKey = process.env.GOOGLE_PAGESPEED_API_KEY;
+    if (!apiKey) {
+      return res.json({
+        status: "warning",
+        message: "No API key configured - using free tier",
+      });
+    }
+
+    // Test with a simple API call
+    const testUrl = "https://www.google.com";
+    const https = require("https");
+
+    const params = new URLSearchParams({
+      url: testUrl,
+      strategy: "mobile",
+      category: "performance",
+      key: apiKey,
+    });
+
+    const apiUrl = `https://www.googleapis.com/pagespeedonline/v5/runPagespeed?${params.toString()}`;
+
+    const result = await new Promise((resolve, reject) => {
+      const request = https.get(apiUrl, (response) => {
+        let data = "";
+        response.on("data", (chunk) => (data += chunk));
+        response.on("end", () => {
+          if (response.statusCode === 200) {
+            resolve(JSON.parse(data));
+          } else if (response.statusCode === 403) {
+            reject(new Error("API key is invalid or lacks permissions"));
+          } else if (response.statusCode === 429) {
+            reject(new Error("API quota exceeded"));
+          } else {
+            reject(new Error(`API returned status ${response.statusCode}`));
+          }
+        });
+      });
+
+      request.on("error", reject);
+      request.setTimeout(10000, () => {
+        request.destroy();
+        reject(new Error("API key test timeout"));
+      });
+    });
+
+    console.log("✅ API key test successful");
+    res.json({
+      status: "success",
+      message: "API key is valid and working",
+      hasPerformanceScore:
+        !!result.lighthouseResult?.categories?.performance?.score,
+    });
+  } catch (error) {
+    console.error("❌ API key test failed:", error.message);
+    res.status(500).json({
+      status: "error",
+      message: "API key test failed",
+      error: error.message,
+    });
+  }
+});
+
+app.get("/api/test-score-extraction", async (req, res) => {
+  console.log("🧪 Testing score extraction logic...");
+
+  // Test the score extraction with mock data
+  const mockCategory = {
+    score: 0.85, // This should become 85
+    title: "Performance",
+  };
+
+  const extractedScore = auditAPI.agent.safeScore(mockCategory);
+  console.log("🧪 Mock score 0.85 extracted as:", extractedScore);
+
+  // Test with null
+  const nullScore = auditAPI.agent.safeScore(null);
+  console.log("🧪 Null score extracted as:", nullScore);
+
+  // Test with undefined
+  const undefinedScore = auditAPI.agent.safeScore(undefined);
+  console.log("🧪 Undefined score extracted as:", undefinedScore);
+
+  res.json({
+    status: "success",
+    tests: {
+      mockScore85: extractedScore,
+      nullScore: nullScore,
+      undefinedScore: undefinedScore,
+    },
+  });
+});
+
 // Test PageSpeed API directly
 app.get("/api/test-pagespeed", async (req, res) => {
   console.log("🧪 Starting PageSpeed API test...");
@@ -115,11 +296,11 @@ app.post("/api/audit/start", async (req, res) => {
     console.log(`🔍 Starting audit for: ${url}`);
     console.log(`⏱️  Start time: ${new Date().toISOString()}`);
 
-    // Set response timeout to 2 minutes
-    req.setTimeout(120000, () => {
+    // Set response timeout to 3 minutes (longer than our API timeouts)
+    req.setTimeout(180000, () => {
       console.log("⏰ Request timeout reached");
     });
-    res.setTimeout(120000, () => {
+    res.setTimeout(180000, () => {
       console.log("⏰ Response timeout reached");
     });
 
@@ -129,6 +310,16 @@ app.post("/api/audit/start", async (req, res) => {
     const report = await auditAPI.auditWebsite(url);
 
     console.log("✅ Audit completed successfully");
+
+    // DEBUG - Add this to see what we're getting
+    console.log(
+      "🧪 DEBUG - Full report summary:",
+      JSON.stringify(report.summary, null, 2)
+    );
+    console.log(
+      "🧪 DEBUG - Mobile scores:",
+      JSON.stringify(report.detailed.mobile, null, 2)
+    );
 
     const duration = Date.now() - startTime;
     console.log(`✅ Total audit duration: ${duration}ms`);
@@ -188,6 +379,9 @@ app.use((req, res) => {
       "GET /api/health",
       "GET /api/simple-test",
       "GET /api/test-pagespeed",
+      "GET /api/test-api-key",
+      "GET /api/debug-pagespeed/:url",
+      "GET /api/test-score-extraction",
       "POST /api/audit/start",
     ],
   });
@@ -242,6 +436,13 @@ async function startServer() {
       console.log(`   Simple: http://localhost:${PORT}/api/simple-test`);
       console.log(
         `   PageSpeed Test: http://localhost:${PORT}/api/test-pagespeed`
+      );
+      console.log(`   API Key Test: http://localhost:${PORT}/api/test-api-key`);
+      console.log(
+        `   Debug PageSpeed: http://localhost:${PORT}/api/debug-pagespeed/google.com`
+      );
+      console.log(
+        `   Score Test: http://localhost:${PORT}/api/test-score-extraction`
       );
       console.log(`🎯 Ready for debugging!`);
     });
